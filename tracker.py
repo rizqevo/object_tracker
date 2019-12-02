@@ -7,7 +7,8 @@ import numpy.linalg as lin
 from additional_funtions.detecting.sort import *
 from additional_funtions.detecting.models import *
 from additional_funtions.detecting.utils import *
-
+from additional_funtions.coordinating.translate_to_realworld import *
+from additional_funtions.coordinating.reorder import *
 
 class Tracker:
     def __init__(self, filter_list, video=0, resolution=416, conf_threshold=0.6, nms_threshold=0.3):
@@ -42,6 +43,8 @@ class Tracker:
         self.inverse_matrix = None
         self.inv_rot_vec_matrix = None
         self.inverse_new_matrix = None
+        self.t_vector = None
+        self.dist = None
 
         self.initialize_chessboard()
 
@@ -59,6 +62,7 @@ class Tracker:
             time_difference = time_current - time_standard
 
             frame = self.tracks_object(frame, time_difference)
+            cv2.drawChessboardCorners(frame, (7, 7), self.corners, self.chess_ret)
 
             time_standard = time.time()
 
@@ -83,7 +87,7 @@ class Tracker:
             frame, detection_for_frame, pad_x, pad_y, unpad_w, unpad_h, img_x, img_y = self.get_variables(
                 target_frame=target_frame)
 
-            print(time_difference)
+            # print(time_difference)
 
             if time_difference >= self.time_slice:
                 if detection_for_frame is not None:
@@ -96,6 +100,20 @@ class Tracker:
                             if class_name in self.filter_list:
                                 self.draw_rectangle_to_frame(frame, each_tracked_object, (img_x, img_y),
                                                              (unpad_h, unpad_w), (pad_x, pad_y))
+
+                                object_image_point = self.get_image_point(each_tracked_object, unpad_w, unpad_h,
+                                                                          pad_x, pad_y, img_x, img_y)
+                                object_real_point = self.get_real_position(object_image_point)
+                                cv2.circle(frame, object_image_point, 2, [255,0,255], 12)
+                                # print(object_image_point)
+                                # print(object_real_point)
+
+                                real_point_x = round(object_real_point[0]*10)/10
+                                real_point_y = round(object_real_point[1]*10)/10
+
+                                if object_real_point is not None:
+                                    if object_real_point[0] > 0 and object_real_point[1] > 0:
+                                        print(real_point_x, real_point_y)
 
             return frame
 
@@ -142,12 +160,31 @@ class Tracker:
 
         return detections[0]
 
-    def get_positions(self, tags=None):
-        if tags is None:
-            tags = self.filter_list
+    def get_image_point(self, tracked_object, unpad_w, unpad_h, pad_x, pad_y, img_x, img_y):
+        x1, y1, x2, y2, _, _ = tracked_object
 
-    def get_real_position(self):
-        pass
+        box_h = int(((y2 - y1) / unpad_h) * img_x)
+        box_w = int(((x2 - x1) / unpad_w) * img_y)
+        y1 = int(((y1 - pad_y // 2) / unpad_h) * img_x)
+        x1 = int(((x1 - pad_x // 2) / unpad_w) * img_y)
+
+        # color = self.colors[int(object_id) % len(self.colors)]
+
+        big_rect_start = (x1, y1)
+        big_rect_end = (x1 + box_w, y1 + box_h)
+
+        x_dist = abs(big_rect_end[0] - big_rect_start[0])
+        y_dist = abs(big_rect_end[1] - big_rect_start[1])
+
+        # result_point = (int(x2 - (x_dist / 2)), int(y2))
+        # result_point = (int(x2 - (x_dist / 2)), int(y2))
+        result_point = (int(big_rect_end[0]-(x_dist/2)), int(big_rect_end[1]))
+
+        return result_point
+
+    def get_real_position(self, image_point):
+        return translate_to_realworld_coordinate(image_point, self.inverse_matrix, self.inv_rot_vec_matrix,
+                                          self.t_vector, self.dist, 0.0001)
 
     def get_predict_position(self):
         pass
@@ -165,6 +202,7 @@ class Tracker:
             frame = self.get_frame()
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             ret, corners = cv2.findChessboardCorners(gray, (7, 7), None)
+            # print(ret)
 
             cv2.imshow('Stream', gray)
             ch = 0xFF & cv2.waitKey(1)
@@ -174,8 +212,14 @@ class Tracker:
             if corners is not None:
                 break
 
+        self.chess_ret = ret
+        self.corners = corners
+        self.criteria = criteria
+
         object_points = [object_points]  # make it to double array
         image_points = [corners]
+
+        object_points = re_ordering(image_points, 7)
 
         ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(object_points, image_points, gray.shape[::-1], None, None)
         rvecsMatrix, J = cv2.Rodrigues(rvecs[0])
@@ -185,10 +229,8 @@ class Tracker:
         self.inverse_matrix = lin.inv(mtx)
         self.inv_rot_vec_matrix = lin.inv(rvecsMatrix)
         self.inverse_new_matrix = lin.inv(newcameramtx)
-
-        self.chess_ret = ret
-        self.corners = corners
-        self.criteria = criteria
+        self.t_vector = tvecs
+        self.dist = dist
 
         print("Chessboard checked")
         self.is_get_chessboard_init = True
