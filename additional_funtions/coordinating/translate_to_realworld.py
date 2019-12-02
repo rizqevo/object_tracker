@@ -15,12 +15,15 @@ def to_normal_plane(inverse, vector):
 
 
 def distort_normal(vector, distortion_values):
-    dist = distortion_values[0]
-    r2 = vector[0] ** 2 + vector[1] ** 2
-    radial_d = 1 + dist[0] * r2 + dist[1] * r2 ** 2 + dist[4] * r2 ** 3
-    x_d = radial_d * vector[0] + 2 * dist[2] * vector[0] * vector[1] + dist[3] * (r2 + 2 * vector[0] ** 2)
-    y_d = radial_d * vector[1] + dist[2] * (r2 + 2 * vector[1] ** 2) + 2 * dist[3] * vector[0] * vector[1]
-    return np.array([x_d, y_d])
+    try:
+        dist = distortion_values[0]
+        r2 = vector[0] ** 2 + vector[1] ** 2
+        radial_d = 1 + dist[0] * r2 + dist[1] * r2 ** 2 + dist[4] * r2 ** 3
+        x_d = radial_d * vector[0] + 2 * dist[2] * vector[0] * vector[1] + dist[3] * (r2 + 2 * vector[0] ** 2)
+        y_d = radial_d * vector[1] + dist[2] * (r2 + 2 * vector[1] ** 2) + 2 * dist[3] * vector[0] * vector[1]
+        return np.array([x_d, y_d])
+    except:
+        return np.array([0, 0])
 
 
 def un_distort(vector, distortion_values, threshold):
