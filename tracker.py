@@ -2,6 +2,7 @@ import cv2
 from torchvision import transforms
 import pickle as pkl
 from PIL import Image
+import numpy.linalg as lin
 
 from additional_funtions.detecting.sort import *
 from additional_funtions.detecting.models import *
@@ -34,6 +35,16 @@ class Tracker:
         self.model.cuda()
         self.model.eval()
 
+        self.corners = None
+        self.criteria = None
+        self.chess_ret = None
+        self.is_get_chessboard_init = False
+        self.inverse_matrix = None
+        self.inv_rot_vec_matrix = None
+        self.inverse_new_matrix = None
+
+        self.initialize_chessboard()
+
     def __del__(self):
         cv2.destroyAllWindows()
         pass
@@ -48,36 +59,40 @@ class Tracker:
                 print("Error - Wrong frame")
                 break
             else:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frame_pil = Image.fromarray(frame)
-                detection_for_frame = self.perform_detection(frame_pil)
 
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                frame_array = np.array(frame_pil)
+                if self.is_get_chessboard_init:
+                    pass
+                else:
+                    time_current = time.time()
+                    time_difference = time_current - time_standard
 
-                pad_x = max(frame_array.shape[0] - frame_array.shape[1], 0) * (self.resolution / max(frame_array.shape))
-                pad_y = max(frame_array.shape[1] - frame_array.shape[0], 0) * (self.resolution / max(frame_array.shape))
-                unpad_h = self.resolution - pad_y
-                unpad_w = self.resolution - pad_x
-                img_x = frame_array.shape[0]
-                img_y = frame_array.shape[1]
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frame_pil = Image.fromarray(frame)
+                    detection_for_frame = self.perform_detection(frame_pil)
 
-                time_current = time.time()
-                time_difference = time_current - time_standard
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    frame_array = np.array(frame_pil)
 
-                if time_difference > self.time_slice:
-                    if detection_for_frame is not None:
-                        tracked_objects = self.mot_tracker.update(detection_for_frame.cpu())
+                    pad_x = max(frame_array.shape[0] - frame_array.shape[1], 0) * (
+                                self.resolution / max(frame_array.shape))
+                    pad_y = max(frame_array.shape[1] - frame_array.shape[0], 0) * (
+                                self.resolution / max(frame_array.shape))
+                    unpad_h = self.resolution - pad_y
+                    unpad_w = self.resolution - pad_x
+                    img_x = frame_array.shape[0]
+                    img_y = frame_array.shape[1]
 
-                        # unique_labels = detection_for_frame[:, -1].cpu().unique()
+                    if time_difference > self.time_slice:
+                        if detection_for_frame is not None:
+                            tracked_objects = self.mot_tracker.update(detection_for_frame.cpu())
 
-                        for each_tracked_object in tracked_objects:
-                            class_name = self.classes[int(each_tracked_object[5])]
+                            for each_tracked_object in tracked_objects:
+                                class_name = self.classes[int(each_tracked_object[5])]
 
-                            if class_name in self.filter_list:
-                                self.draw_rectangle_to_frame(frame, each_tracked_object, (img_x, img_y),
-                                                             (unpad_h, unpad_w), (pad_x, pad_y))
-                    time_standard = time.time()
+                                if class_name in self.filter_list:
+                                    self.draw_rectangle_to_frame(frame, each_tracked_object, (img_x, img_y),
+                                                                 (unpad_h, unpad_w), (pad_x, pad_y))
+                        time_standard = time.time()
 
             cv2.imshow('Stream', frame)
             ch = 0xFF & cv2.waitKey(1)
@@ -127,7 +142,33 @@ class Tracker:
         pass
 
     def initialize_chessboard(self):
-        pass
+        tile_size = (31.5, 31.5)  # size cm
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+
+        object_points = np.zeros((7 * 7, 3), np.float32)
+        object_points[:, :2] = np.mgrid[0:7, 0:7].T.reshape(-1, 2)
+
+        frame = self.get_frame()
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        ret, corners = cv2.findChessboardCorners(gray, (7, 7), None)
+
+        object_points = [object_points]  # make it to double array
+        image_points = [corners]
+
+        ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(object_points, image_points, gray.shape[::-1], None, None)
+        rvecsMatrix, J = cv2.Rodrigues(rvecs[0])
+        h, w = frame.shape[:2]
+        newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
+
+        self.inverse_matrix = lin.inv(mtx)
+        self.inv_rot_vec_matrix = lin.inv(rvecsMatrix)
+        self.inverse_new_matrix = lin.inv(newcameramtx)
+
+        self.chess_ret = ret
+        self.corners = corners
+        self.criteria = criteria
+
+        self.is_get_chessboard_init = True
 
     def draw_rectangle_to_frame(self, frame, tracked_object, shapes, unpads, pads):
         unpad_h = unpads[0]
