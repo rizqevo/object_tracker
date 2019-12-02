@@ -30,6 +30,9 @@ import time
 import argparse
 from filterpy.kalman import KalmanFilter
 
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 @jit
 def iou(bb_test,bb_gt):
   """
