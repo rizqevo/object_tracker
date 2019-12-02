@@ -182,18 +182,18 @@ class Sort(object):
     self.max_age = max_age
     self.min_hits = min_hits
     self.trackers = []
-    self.frame_count = 0
+    self.sort_frame_count = 0
 
   def update(self,dets):
     """
     Params:
       dets - a numpy array of detections in the format [[x1,y1,x2,y2,score],[x1,y1,x2,y2,score],...]
-    Requires: this method must be called once for each frame even with empty detections.
+    Requires: this method must be called once for each sort_frame even with empty detections.
     Returns the a similar array, where the last column is the object ID.
 
     NOTE: The number of objects returned may differ from the number of detections provided.
     """
-    self.frame_count += 1
+    self.sort_frame_count += 1
     #get predicted locations from existing trackers.
     trks = np.zeros((len(self.trackers),5))
     to_del = []
@@ -221,7 +221,7 @@ class Sort(object):
     i = len(self.trackers)
     for trk in reversed(self.trackers):
         d = trk.get_state()[0]
-        if((trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits)):
+        if((trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.sort_frame_count <= self.min_hits)):
           ret.append(np.concatenate((d,[trk.id+1], [trk.objclass])).reshape(1,-1)) # +1 as MOT benchmark requires positive
         i -= 1
         #remove dead tracklet
@@ -245,7 +245,7 @@ if __name__ == '__main__':
   display = args.display
   phase = 'train'
   total_time = 0.0
-  total_frames = 0
+  total_sort_frames = 0
   colours = np.random.rand(32,3) #used only for display
   if(display):
     if not os.path.exists('mot_benchmark'):
@@ -262,15 +262,15 @@ if __name__ == '__main__':
     seq_dets = np.loadtxt('data/%s/det.txt'%(seq),delimiter=',') #load detections
     with open('output/%s.txt'%(seq),'w') as out_file:
       print("Processing %s."%(seq))
-      for frame in range(int(seq_dets[:,0].max())):
-        frame += 1 #detection and frame numbers begin at 1
-        dets = seq_dets[seq_dets[:,0]==frame,2:7]
+      for sort_frame in range(int(seq_dets[:,0].max())):
+        sort_frame += 1 #detection and sort_frame numbers begin at 1
+        dets = seq_dets[seq_dets[:,0]==sort_frame,2:7]
         dets[:,2:4] += dets[:,0:2] #convert to [x1,y1,w,h] to [x1,y1,x2,y2]
-        total_frames += 1
+        total_sort_frames += 1
 
         if(display):
           ax1 = fig.add_subplot(111, aspect='equal')
-          fn = 'mot_benchmark/%s/%s/img1/%06d.jpg'%(phase,seq,frame)
+          fn = 'mot_benchmark/%s/%s/img1/%06d.jpg'%(phase,seq,sort_frame)
           im =io.imread(fn)
           ax1.imshow(im)
           plt.title(seq+' Tracked Targets')
@@ -281,7 +281,7 @@ if __name__ == '__main__':
         total_time += cycle_time
 
         for d in trackers:
-          print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1'%(frame,d[4],d[0],d[1],d[2]-d[0],d[3]-d[1]),file=out_file)
+          print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1'%(sort_frame,d[4],d[0],d[1],d[2]-d[0],d[3]-d[1]),file=out_file)
           if(display):
             d = d.astype(np.int32)
             ax1.add_patch(patches.Rectangle((d[0],d[1]),d[2]-d[0],d[3]-d[1],fill=False,lw=3,ec=colours[d[4]%32,:]))
@@ -292,7 +292,7 @@ if __name__ == '__main__':
           plt.draw()
           ax1.cla()
 
-  print("Total Tracking took: %.3f for %d frames or %.1f FPS"%(total_time,total_frames,total_frames/total_time))
+  print("Total Tracking took: %.3f for %d sort_frames or %.1f FPS"%(total_time,total_sort_frames,total_sort_frames/total_time))
   if(display):
     print("Note: to get real runtime results run without the option: --display")
   
