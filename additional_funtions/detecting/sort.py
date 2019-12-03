@@ -17,6 +17,9 @@
 """
 from __future__ import print_function
 
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 from numba import jit
 import os.path
 import numpy as np
@@ -30,8 +33,7 @@ import time
 import argparse
 from filterpy.kalman import KalmanFilter
 
-import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 
 @jit
 def iou(bb_test,bb_gt):
