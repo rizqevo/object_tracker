@@ -7,7 +7,7 @@ class Predictor:
     def update_last_point(self, x, y):
         self.last_point = [x, y]
 
-    def predict_with_last_point(self, current_x, current_y, object_id=0):
+    def predict_next_point(self, current_x, current_y, object_id=0):
         if object_id in self.objects_last_point.keys():
             moved_x = current_x - self.objects_last_point[object_id][0]
             moved_y = current_y - self.objects_last_point[object_id][1]
