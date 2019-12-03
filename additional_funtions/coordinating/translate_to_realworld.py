@@ -16,6 +16,9 @@ def to_normal_plane(inverse, vector):
 
 def distort_normal(vector, distortion_values):
     try:
+        if math.isnan(vector[0]) or math.isnan(vector[1]):
+            return np.array([0, 0])
+
         dist = distortion_values[0]
         r2 = vector[0] ** 2 + vector[1] ** 2
         radial_d = 1 + dist[0] * r2 + dist[1] * r2 ** 2 + dist[4] * r2 ** 3
@@ -30,6 +33,10 @@ def un_distort(vector, distortion_values, threshold):
     p_d = vector
     p_u = vector
     while True:
+        if math.isnan(p_d[0]) or math.isnan(p_u[0]):
+            p_d = vector
+            p_u = vector
+            threshold = threshold*10
         dist = distort_normal(p_u, distortion_values)
         err = (dist - p_d)
         p_u = (p_u - err)
