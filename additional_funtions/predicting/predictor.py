@@ -8,6 +8,10 @@ class Predictor:
     def update_last_point(self, x, y):
         self.last_point = [x, y]
 
+    def remove_point(self, object_id):
+        del self.objects_last_point[object_id]
+        del self.objects_predicted_point[object_id]
+
     def get_predicted_point(self, object_id):
         return self.objects_predicted_point[object_id]
 
