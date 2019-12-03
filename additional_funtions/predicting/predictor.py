@@ -3,9 +3,16 @@ class Predictor:
         self.last_point = None
         self.time_slice = time_slice
         self.objects_last_point = dict()
+        self.objects_predicted_point = dict()
 
     def update_last_point(self, x, y):
         self.last_point = [x, y]
+
+    def get_predicted_point(self, object_id):
+        return self.objects_predicted_point[object_id]
+
+    def get_last_point(self, object_id):
+        return self.objects_last_point[object_id]
 
     def predict_next_point(self, current_x, current_y, object_id=0):
         if object_id in self.objects_last_point.keys():
@@ -13,12 +20,13 @@ class Predictor:
             moved_y = current_y - self.objects_last_point[object_id][1]
 
             self.objects_last_point[object_id] = [current_x, current_y]
+            self.objects_predicted_point[object_id] = [current_x + moved_x, current_y + moved_y]
 
-            return [current_x + moved_x, current_y + moved_y]
+            return self.objects_predicted_point[object_id]
         else:
             self.objects_last_point[object_id] = [current_x, current_y]
 
-            return [current_x, current_y]
+            return current_x, current_y
 
 
 class PredictorFill:
