@@ -9,9 +9,13 @@ from additional_funtions.detecting.models import *
 from additional_funtions.detecting.utils import *
 from additional_funtions.coordinating.translate_to_realworld import *
 from additional_funtions.coordinating.reorder import *
+from additional_funtions.predicting.predictor import Predictor
+
+
+# np.seterr(all='raise')
 
 class Tracker:
-    def __init__(self, filter_list, video=0, resolution=416, conf_threshold=0.6, nms_threshold=0.3):
+    def __init__(self, filter_list, video=0, resolution=416, conf_threshold=0.5, nms_threshold=0.3):
         self.config_path = 'model_config/yolov3.cfg'
         self.weights_path = 'model_config/yolov3.weights'
         self.class_path = 'model_data/coco.names'
@@ -45,6 +49,14 @@ class Tracker:
         self.inverse_new_matrix = None
         self.t_vector = None
         self.dist = None
+
+        self.width = 0
+        self.height = 0
+
+        self.object_disappeared = dict()
+        self.object_data = dict()
+
+        self.predictor_future = Predictor(0)
 
         self.initialize_chessboard()
 
@@ -93,29 +105,79 @@ class Tracker:
                 if detection_for_frame is not None:
                     tracked_objects = self.mot_tracker.update(detection_for_frame.cpu())
 
-                    if self.is_get_chessboard_init:
-                        for each_tracked_object in tracked_objects:
-                            class_name = self.classes[int(each_tracked_object[5])]
+                    for each_id in self.object_disappeared.keys():
+                        self.object_disappeared[each_id] = True
 
-                            if class_name in self.filter_list:
-                                self.draw_rectangle_to_frame(frame, each_tracked_object, (img_x, img_y),
+                    for each_tracked_object in tracked_objects:
+                        object_id = int(each_tracked_object[4])
+                        person_id = self.get_index_for_object_id(object_id)
+
+                        self.object_data[person_id] = each_tracked_object
+                        self.object_disappeared[person_id] = False
+
+                    remove_indicies = []
+
+                    for each_id, each_object in self.object_data.items():
+                        each_has_disappeared = self.object_disappeared[each_id]
+                        class_name = self.classes[int(each_object[5])]
+
+                        current_point = None
+
+                        if class_name in self.filter_list:
+                            if each_has_disappeared:
+                                # 마지막 예측값이 이미지 바깥쪽이나 가장자리인지 확인함
+                                # 바깥쪽이거나 가장자리면 정상적으로 없어진 포인트
+                                # 기존 예측값들을 삭제함
+                                # 그게 아니라면 비정상적으로 없어진 포인트
+                                # 기존 예측값을 current point로 지정
+                                # current point를 토대로 표시를 진행
+                                current_point = self.predictor_future.get_predicted_point(each_id)
+                                if self.has_disappear_correctly(current_point):
+                                    remove_indicies.append(each_id)
+                                    continue
+                            else:
+                                # tracking 결과를 토대로 current point 지정
+                                # 표시 진행
+                                # 이후 예측될 point 계산 후 저장
+                                self.draw_rectangle_to_frame(frame, each_object, (img_x, img_y),
                                                              (unpad_h, unpad_w), (pad_x, pad_y))
 
-                                object_image_point = self.get_image_point(each_tracked_object, unpad_w, unpad_h,
-                                                                          pad_x, pad_y, img_x, img_y)
-                                object_real_point = self.get_real_position(object_image_point)
-                                cv2.circle(frame, object_image_point, 2, [255,0,255], 12)
-                                # print(object_image_point)
-                                # print(object_real_point)
+                                current_point = self.get_image_point(each_object, unpad_w, unpad_h,
+                                                                     pad_x, pad_y, img_x, img_y)
+                        else:
+                            continue
 
-                                real_point_x = round(object_real_point[0]*10)/10
-                                real_point_y = round(object_real_point[1]*10)/10
 
-                                if object_real_point is not None:
-                                    if object_real_point[0] > 0 and object_real_point[1] > 0:
-                                        print(real_point_x, real_point_y)
+                        # real point 전달
+                        current_real_point = self.get_real_position(current_point)
+                        real_point_x = round(current_real_point[0] * 10) / 10
+                        real_point_y = round(current_real_point[1] * 10) / 10
+                        if current_real_point is not None:
+                            if current_real_point[0] > 0 and current_real_point[1] > 0:
+                                print(real_point_x, real_point_y)
+
+                        # current point를 토대로 예측을 진행
+                        predict_point = self.predictor_future.predict_next_point(current_point[0],
+                                                                                 current_point[1],
+                                                                                 object_id=each_id)
+
+                        cv2.circle(frame, current_point, 2, [255, 0, 0], 12)
+
+                    for each_id in remove_indicies:
+                        self.predictor_future.remove_point(each_id)
+                        del self.object_data[each_id]
+                        del self.object_disappeared[each_id]
 
             return frame
+
+    def has_disappear_correctly(self, point):
+        x = point[0]
+        y = point[1]
+
+        if (x > self.width-(self.width/10) or x < self.width/10) or (y > self.height-(self.height/10) or y < self.height/10):
+            return True
+        else:
+            return False
 
     def get_variables(self, target_frame):
         frame = cv2.cvtColor(target_frame, cv2.COLOR_BGR2RGB)
@@ -160,7 +222,8 @@ class Tracker:
 
         return detections[0]
 
-    def get_image_point(self, tracked_object, unpad_w, unpad_h, pad_x, pad_y, img_x, img_y):
+    @staticmethod
+    def get_image_point(tracked_object, unpad_w, unpad_h, pad_x, pad_y, img_x, img_y):
         x1, y1, x2, y2, _, _ = tracked_object
 
         box_h = int(((y2 - y1) / unpad_h) * img_x)
@@ -174,17 +237,17 @@ class Tracker:
         big_rect_end = (x1 + box_w, y1 + box_h)
 
         x_dist = abs(big_rect_end[0] - big_rect_start[0])
-        y_dist = abs(big_rect_end[1] - big_rect_start[1])
+        # y_dist = abs(big_rect_end[1] - big_rect_start[1])
 
         # result_point = (int(x2 - (x_dist / 2)), int(y2))
         # result_point = (int(x2 - (x_dist / 2)), int(y2))
-        result_point = (int(big_rect_end[0]-(x_dist/2)), int(big_rect_end[1]))
+        result_point = (int(big_rect_end[0] - (x_dist / 2)), int(big_rect_end[1]))
 
         return result_point
 
     def get_real_position(self, image_point):
         return translate_to_realworld_coordinate(image_point, self.inverse_matrix, self.inv_rot_vec_matrix,
-                                          self.t_vector, self.dist, 0.0001)
+                                                 self.t_vector, self.dist, 0.0001)
 
     def get_predict_position(self):
         pass
@@ -200,6 +263,8 @@ class Tracker:
 
         while True:
             frame = self.get_frame()
+            self.width = frame.shape[0]
+            self.height = frame.shape[1]
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             ret, corners = cv2.findChessboardCorners(gray, (7, 7), None)
             # print(ret)
@@ -209,17 +274,20 @@ class Tracker:
             if ch == 27:
                 break
 
-            if corners is not None:
+            if corners is not None and ret:
                 break
 
         self.chess_ret = ret
         self.corners = corners
         self.criteria = criteria
 
-        object_points = [object_points]  # make it to double array
+        # object_points = [object_points]  # make it to double array
         image_points = [corners]
 
         object_points = re_ordering(image_points, 7)
+
+        # print(len(object_points))
+        # print(len(image_points))
 
         ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(object_points, image_points, gray.shape[::-1], None, None)
         rvecsMatrix, J = cv2.Rodrigues(rvecs[0])
@@ -244,14 +312,14 @@ class Tracker:
         pad_y = pads[1]
 
         x1, y1, x2, y2, obj_id, cls_pred = tracked_object
-        object_id = self.get_index_for_object_id(object_id=str(obj_id))
+        person_id = self.get_index_for_object_id(object_id=str(obj_id))
         class_name = self.classes[int(cls_pred)]
 
         box_h = int(((y2 - y1) / unpad_h) * imgX)
         box_w = int(((x2 - x1) / unpad_w) * imgY)
         y1 = int(((y1 - pad_y // 2) / unpad_h) * imgX)
         x1 = int(((x1 - pad_x // 2) / unpad_w) * imgY)
-        color = self.colors[int(object_id) % len(self.colors)]
+        color = self.colors[int(person_id) % len(self.colors)]
 
         big_rect_start = (x1, y1)
         big_rect_end = (x1 + box_w, y1 + box_h)
@@ -261,7 +329,7 @@ class Tracker:
 
         cv2.rectangle(frame, big_rect_start, big_rect_end, color, 4)  # 큰 사각형
         cv2.rectangle(frame, namecard_start, namecard_end, color, -1)  # 이름표
-        cv2.putText(frame, class_name + "-" + str(int(object_id)), text_point, cv2.FONT_HERSHEY_SIMPLEX, 1,
+        cv2.putText(frame, class_name + "-" + str(int(person_id)), text_point, cv2.FONT_HERSHEY_SIMPLEX, 1,
                     (255, 255, 255), 3)
 
     def get_index_for_object_id(self, object_id):
@@ -269,6 +337,8 @@ class Tracker:
             return self.indices_dict[object_id]
         else:
             self.indices_dict[object_id] = int(self.current_index)
+            self.object_disappeared[self.current_index] = False
+
             self.current_index += 1
 
             return self.indices_dict[object_id]
